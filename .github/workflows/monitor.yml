@@ -1,0 +1,52 @@
+name: Polymarket Monitor
+
+on:
+  schedule:
+    # Svakih 10 minuta. VAŽNO za privatni repo: 5-min interval potroši
+    # besplatnih 2.000 Actions minuta mjesečno za nekoliko dana.
+    # Na JAVNOM repu su minute neograničene — tada slobodno stavi */5.
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}  # ručno pokretanje preko GitHub UI-ja
+
+permissions:
+  contents: write
+
+# Sprječava preklapanje dva runa (npr. ako jedan kasni) — inače bi se
+# mogli potući oko commitanja state.json
+concurrency:
+  group: polymarket-monitor
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run monitor
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python monitor.py
+
+      - name: Commit updated state
+        run: |
+          git config user.name "polymarket-monitor-bot"
+          git config user.email "actions@github.com"
+          git add state.json
+          if ! git diff --quiet --staged; then
+            git commit -m "update state [skip ci]"
+            # rebase u slučaju da je netko/nešto pushalo u međuvremenu
+            git pull --rebase origin ${GITHUB_REF_NAME} || true
+            git push
+          fi
